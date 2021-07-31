@@ -5,6 +5,8 @@ from subprocess import Popen, PIPE
 from threading import Thread
 from typing import List, Union
 
+from psutil import Process
+
 
 class CONFIGURATIONS:
     SMALLEST_FFTS = dict(
@@ -127,12 +129,13 @@ class Worker:
         Worker stopped.
     """
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, pid: int = None):
         self.number = number
         self.tests: List[Test] = []
         self.status: Union[Statuses, None] = None
         self.status_reason = None
         self.summary = None
+        self.pid: int = pid
 
     @staticmethod
     def __chunked_line_parser(chunked_line: List[str]):
@@ -262,6 +265,29 @@ class MPrime:
             time_elapsed=self.time_elapsed,
         )
 
+    def list_worker_pids(self):
+        pids = []
+
+        for thread in Process(self.mprime.pid).threads():
+            proc = Process(thread.id)
+            if (
+                self.executable.lower() in proc.name().lower()
+                and proc.status() == "running"
+            ):
+                pids.append(proc.pid)
+
+        pids.sort()
+
+        return pids
+
+    def get_worker_pid(self, worker_number: int):
+        pids = self.list_worker_pids()
+        while len(pids) < worker_number:
+            time.sleep(0.005)
+            pids = self.list_worker_pids()
+
+        return pids[worker_number - 1]
+
     def __del__(self):
         """
         Might get invoked... might not...
@@ -326,7 +352,7 @@ class MPrime:
             elif line.startswith("[Worker"):
                 worker_number = int(line.split()[1].strip("#"))
                 if not self.workers.get(worker_number):
-                    worker = Worker(worker_number)
+                    worker = Worker(worker_number, self.get_worker_pid(worker_number))
                     self.workers[worker_number] = worker
                     self.handlers["on_worker_add"](worker)
                 else:
