@@ -136,9 +136,25 @@ class Worker:
 
     @staticmethod
     def __chunked_line_parser(chunked_line: List[str]):
+        """Parses chunked line that started life like:
+        OLD: Test 1, 270000 Lucas-Lehmer          iterations of M420217  using type-1 FFT length 20K,  Pass1=80,  Pass2=256.
+        OLD: Test 1, 31000  Lucas-Lehmer          iterations of M9961473 using FMA3   FFT length 512K, Pass1=512, Pass2=1K,  clm=1.
+        NEW: Test 1, 220000 Lucas-Lehmer in-place iterations of M1633941 using FMA3   FFT length 80K,  Pass1=320, Pass2=256, clm=4.
+
+        Args:
+            chunked_line (List[str]): [description]
+
+        Raises:
+            RuntimeError: [description]
+
+        Returns:
+            [type]: [description]
+        """
         test = chunked_line.pop(0).strip(",")
         num_iterations = chunked_line.pop(0)
         test_name = chunked_line.pop(0)
+        if "in-place" in chunked_line[0]:
+            _filler_in_place = chunked_line.pop(0)
         _filler_iterations = chunked_line.pop(0)
         _filler_of = chunked_line.pop(0)
         thing = chunked_line.pop(0)
@@ -154,8 +170,7 @@ class Worker:
 
         if "type-" in chunked_line[0]:
             type_num = chunked_line.pop(0)
-
-        type_name = chunked_line.pop(0)
+            type_name = chunked_line.pop(0)
 
         if "length" in chunked_line[0]:
             _filler_length = chunked_line.pop(0)
@@ -310,10 +325,10 @@ class MPrime:
                 continue
 
             if line.startswith("[Main thread"):
-                if "Starting workers" in line:
+                if "Starting worker" in line:
                     self.status = Statuses.running
                     continue
-                elif "Stopping all worker threads" in line:
+                elif "Stopping all worker " in line:
                     self.status = Statuses.stopping
                     for worker in filter(
                         lambda w: w.status != Statuses.failed, self.workers.values()
@@ -323,8 +338,11 @@ class MPrime:
                 elif "Execution halted." in line:
                     continue
 
-            elif line.startswith("[Worker"):
-                worker_number = int(line.split()[1].strip("#"))
+            elif line.startswith("[Worker") or line.startswith("[Work thread"):
+                if line.startswith("[Work thread"):
+                    worker_number = 1
+                else:
+                    worker_number = int(line.split()[1].strip("#"))
                 if not self.workers.get(worker_number):
                     worker = Worker(worker_number)
                     self.workers[worker_number] = worker
@@ -342,7 +360,10 @@ class MPrime:
                     continue
                 elif "Setting affinity" in line:
                     continue
-                elif "Lucas-Lehmer iterations" in line:  # beginning of a task
+                elif (
+                    "Lucas-Lehmer iterations" in line
+                    or "Lucas-Lehmer in-place iterations" in line
+                ):  # beginning of a task
                     worker.add_test(line.strip(".").split("Test")[-1].split())
                     self.handlers["on_test_start"](worker)
                     continue
